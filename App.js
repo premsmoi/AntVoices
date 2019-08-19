@@ -1,10 +1,10 @@
 import { AppRegistry } from 'react-native'
 import React from 'react'
-import MainScreen from './screens/MainScreen'
+import MainScreen from './src/screens/MainScreen'
 import { name as appName } from './app.json'
 import { Provider } from 'react-redux'
 import { createStore } from 'redux'
-import rootReducer from './redux/reducers'
+import rootReducer from './src/redux/reducers'
 
 const store = createStore(rootReducer)
 

@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View, Button } from 'react-native';
 import { getMMSSFromMillis } from '../utilities/TimeUtils'
 
-export default class Voice extends React.Component {
+export default class Topic extends React.Component {
 
   constructor(props) {
     super(props);
