@@ -6,16 +6,15 @@ import {
 	View,
   BackHandler,
 	TouchableWithoutFeedback } from 'react-native'
-import { Icon } from 'native-base';
+import { Icon, Row } from 'native-base';
 import * as CommonStyle from '../styles/CommonStyle'
 import { getMMSSFromMillis } from '../utilities/TimeUtils'
 import { connect } from 'react-redux'
 import { closeComposeVoiceModal } from '../redux/actions'
 import { Audio } from 'expo-av'
 import * as FileSystem from 'expo-file-system'
-import * as Font from 'expo-font'
-import * as Permissions from 'expo-permissions'
-/*import { FontAwesome, Ionicons } from '@expo/vector-icons'*/
+import * as NetworkUtils from '../utilities/NetworkUtils'
+import * as AppDatabase from '../database/AppDatabase'
 
 class ComposeVoiceModal extends React.Component {
 
@@ -23,10 +22,14 @@ class ComposeVoiceModal extends React.Component {
     super(props)
     this.recording = null;
     this.sound = null;
+    this.base64Sound = null
     this.id = 0;
+    this.isDrafted = false
+    this.uri = null
+    this.filename = null
 
     this.state = {
-      text: '',
+      summary: '',
       isRecording: false,
       isPlaying: false,
       isLoading: false,
@@ -43,9 +46,55 @@ class ComposeVoiceModal extends React.Component {
     this.clearRecord()
   }
 
-  onPostVoice = () => {
-  	this.props.closeVoiceModal()
-    /* this.clearAllStates() */
+  closeThisModal = () => {
+    console.log('isModalDrafted: '+this.isModalDrafted)
+    if (this.isModalDrafted) {
+      Alert.alert(
+        'Your post is being composed',
+        'What would you like to do?',
+        [
+          {text: 'STAY', onPress: () => {}},
+          {text: 'LEAVE', onPress: () => {
+            this.props.closeVoiceModal()
+            
+          }},
+        ]
+      )
+    } else {
+      this.props.closeVoiceModal()
+    } 
+  }
+
+
+  onPostVoice = async () => {
+   /*  const response = NetworkUtils.uploadAudio(this.base64Sound)
+    console.log('response: '+JSON.stringify(response)) */
+    await FileSystem.writeAsStringAsync(this.uri, this.base64Sound, {
+      encoding: FileSystem.EncodingType.Base64})
+
+    AppDatabase.addPost(this.state.summary, this.filename, this.state.soundDuration)
+      .then((postId) => {
+        if (this.props.type == 'topic') {
+          AppDatabase.addTopicComment(postId, null)
+          console.log('Post Topic!')
+        } else {
+          AppDatabase.addTopicComment(this.props.topicId, postId)
+          console.log('Post comment!')
+        }
+        this.props.onPost()
+        this.props.closeVoiceModal()
+      })
+    
+    
+
+    /* await AppDatabase.addTopicComment(TopicId, null) */
+
+    /* const newVoiceObject = {
+      summary: this.state.summary,
+      audio: this.base64Sound,
+      soundDuration: this.state.soundDuration
+    }*/
+    
   }
 
   async clearRecord() {
@@ -87,6 +136,24 @@ class ComposeVoiceModal extends React.Component {
     this.setState({isLoading: false})
   }
 
+  async playSoundTest() {
+    const soundString = await FileSystem.readAsStringAsync(this.recording.getURI(), {
+      encoding: FileSystem.EncodingType.Base64,
+      length: 1})
+    const soundDirectory = await FileSystem.documentDirectory + 'test.m4a'
+    FileSystem.writeAsStringAsync(soundDirectory, soundString)
+    console.log('soundDirectory: '+soundDirectory)
+    const soundObject = new Audio.Sound();
+    try {
+      await soundObject.loadAsync(soundDirectory);
+      //await soundObject.playAsync();
+      // Your sound is playing!
+    } catch (error) {
+      // An error occurred!
+    }
+    this.sound = soundObject
+  }
+
   async stopRecordingAndEnablePlayback() {
     console.log('Stop Recording and Start Playback')
     this.setState({isLoading: true})
@@ -95,8 +162,34 @@ class ComposeVoiceModal extends React.Component {
     } catch (error) {
       // Do nothing -- we are already unloaded.
     }
+    
+    // This soundBase64 will be submitted to the server.
+    const base64Sound = await FileSystem.readAsStringAsync(this.recording.getURI(), {
+      encoding: FileSystem.EncodingType.Base64})
+    this.base64Sound = base64Sound
     const info = await FileSystem.getInfoAsync(this.recording.getURI());
     console.log(`FILE INFO: ${JSON.stringify(info)}`);
+    
+    // FileSystem.documentDirectory returns below URI
+    // file:///data/user/0/host.exp.exponent/files/ExperienceData/%2540premsmoi%252FAntVoices/ 
+
+    const appDir = await FileSystem.documentDirectory
+    const audioDir = appDir+'Audios/'
+    const audioList = await FileSystem.readDirectoryAsync(audioDir)
+    console.log('audiosDir: '+audioDir)    
+    console.log('audioList: '+audioList) 
+    
+    const filename = 'audio_'+audioList.length+'.m4a'
+    this.filename = filename
+    const soundDirectory = audioDir + filename
+    this.uri = soundDirectory
+    const soundString = (base64Sound)
+    /* await FileSystem.writeAsStringAsync(soundDirectory, base64Sound, {
+      encoding: FileSystem.EncodingType.Base64}) */
+    console.log('soundDirectory: '+soundDirectory)
+    /* const soundString2 = await FileSystem.readAsStringAsync(soundDirectory, {
+      encoding: FileSystem.EncodingType.Base64}) */
+
     await Audio.setAudioModeAsync({
       allowsRecordingIOS: false,
       interruptionModeIOS: Audio.INTERRUPTION_MODE_IOS_DO_NOT_MIX,
@@ -110,22 +203,20 @@ class ComposeVoiceModal extends React.Component {
     const { sound, status } = await this.recording.createNewLoadedSoundAsync(
       {
         isLooping: true,
-        /*isMuted: this.state.muted,
-        volume: this.state.volume,
-        rate: this.state.rate,
-        shouldCorrectPitch: this.state.shouldCorrectPitch,*/
       },
       this.updateScreenForSoundStatus
     );
+      /* const { sound, status } = await Audio.Sound.createAsync(
+        {uri:soundDirectory},
+        {isLooping: true},
+        this.updateScreenForSoundStatus
+      ); */
+    
     this.sound = sound;
     this.sound.setVolumeAsync(1);
-    let newVoiceRecord = {
-        description: this.id++,
-        sound: this.sound,
-        soundDuration: status.durationMillis,
-      }
     this.setState({isLoading: false})
     this.props.draftStatus(true)
+    this.isDrafted = true
   }
 
   onPlayPausePressed = () => {
@@ -142,6 +233,7 @@ class ComposeVoiceModal extends React.Component {
     if (this.state.isRecording) {
       this.setState({isRecording: false})
       this.stopRecordingAndEnablePlayback();
+      /* this.playSoundTest() */
     } else {
       this.stopPlaybackAndBeginRecording();
     }
@@ -165,7 +257,7 @@ class ComposeVoiceModal extends React.Component {
   };
 
   updateScreenForSoundStatus = (status) => {
-    console.log('updateScreenForSoundStatus')
+    /* console.log('updateScreenForSoundStatus') */
     if (this.props.isVoiceModalVisible) {
       if (status.isLoaded) {
         this.setState({
@@ -210,13 +302,14 @@ class ComposeVoiceModal extends React.Component {
   _renderSummaryInput = () => (
     <TextInput
       style={styles.textInput}
-      onChangeText={(text) => {
-        this.setState({text})
-        if (text != '') {
+      onChangeText={(summary) => {
+        this.setState({summary})
+        if (summary != '') {
           this.props.draftStatus(true)
+          this.isDrafted = true
         }
       }}
-      value={this.state.text}
+      value={this.state.summary}
       multiline = {true}
       numberOfLines = {2}
       maxLength = {45}
@@ -227,7 +320,7 @@ class ComposeVoiceModal extends React.Component {
   _renderRecordingComponent = () => (
     <View style={styles.recordingContainer}>
       <Text style = {styles.timerText}>{this.getRecordingTimestamp()}</Text>
-      <View style={styles.buttonContainer}>
+      <View style={CommonStyle.styles.buttonContainer}>
         <TouchableWithoutFeedback onPress={this.recordingHandler}>
           <Icon type="FontAwesome" 
             name="microphone" 
@@ -251,7 +344,7 @@ class ComposeVoiceModal extends React.Component {
       } 
       {  
         !this.state.isRecording && this.sound != null &&
-        <View style={styles.buttonContainer}>
+        <View style={CommonStyle.styles.buttonContainer}>
           <TouchableWithoutFeedback onPress={this.onPlayPausePressed}>
             <Icon type="FontAwesome" 
               name={this.state.isPlaying? 'pause': 'play'} 
@@ -266,22 +359,40 @@ class ComposeVoiceModal extends React.Component {
   )
 
 	render() {
-    let canPost = this.state.text != '' && this.sound != null
+    let canPost = this.state.summary != '' && this.sound != null
 		return(
 			<View style={styles.modalContainer}>
-        <View style={styles.headerContaioner}>
-          <Text style={styles.modalText}>HEADER</Text>
+        <View style={styles.headerContainer}>
+          <Text style={styles.headerText}>{'TBD'}</Text>
+          <View style={{flex:2}}/>
+          <View style={CommonStyle.styles.buttonContainer}>
+            <TouchableWithoutFeedback onPress={() => this.props.onClosePostModal(this.isDrafted)}>
+              <Icon type="FontAwesome" 
+                name={'times'} 
+                style={{
+                  fontSize: 24, 
+                  color: 'white'
+                }} />
+            </TouchableWithoutFeedback>
+          </View>
         </View>
         { this._renderSummaryInput() }
 				{ this._renderRecordingComponent() }
         { /* this._renderPlaybackComponent() */ }
         {
-          <View style = {styles.buttonContainer}>
-            <TouchableWithoutFeedback
-              onPress={canPost? this.onPostVoice:null}>
-              <Text style = {styles.modalText}>{canPost? 'POST':''}</Text>
-            </TouchableWithoutFeedback>
+          <View style={{
+            flexDirection:'row',
+            ...CommonStyle.styleForTest,
+          }}>
+            <View style={{flex:4}}/>
+            <View style = {CommonStyle.styles.buttonContainer}>
+              <TouchableWithoutFeedback
+                onPress={canPost? this.onPostVoice:null}>
+                <Text style = {CommonStyle.styles.buttonText}>{canPost? 'POST':''}</Text>
+              </TouchableWithoutFeedback>
+            </View>
           </View>
+          
         }
 				
 			</View>
@@ -312,13 +423,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 10,
   },
-  headerContaioner: {
+  headerContainer: {
+    flexDirection: 'row',
     padding: 5,
-    alignItems: 'flex-start',
     ...CommonStyle.styleForTest,
   },
-  modalText: {
+  headerText: {
     fontSize: 16,
+    alignSelf: 'center',
+    justifyContent: 'center',
     color: "white",
     ...CommonStyle.styleForTest,
   },
@@ -333,11 +446,6 @@ const styles = StyleSheet.create({
   },
   playbackContainer: {
     flexDirection: 'row',
-    ...CommonStyle.styleForTest,
-  },
-  buttonContainer: {
-    padding: 5,
-    alignItems: 'flex-end',
     ...CommonStyle.styleForTest,
   },
   textInput: {

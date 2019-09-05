@@ -1,19 +1,16 @@
 import { AppRegistry } from 'react-native'
 import React from 'react'
-import MainScreen from './src/screens/MainScreen'
 import { name as appName } from './app.json'
 import { Provider } from 'react-redux'
-import { createStore } from 'redux'
-import rootReducer from './src/redux/reducers'
-
-const store = createStore(rootReducer)
+import Store from './src/redux/Store'
+import AppNavigator from './src/AppNavigator'
 
 export default class App extends React.Component {
   
   render() {
     return(
-      <Provider store = { store }>
-        <MainScreen />
+      <Provider store = { Store }>
+        <AppNavigator/> 
       </Provider>
     )
   }
